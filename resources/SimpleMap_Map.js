@@ -7,6 +7,7 @@ var SimpleMap = function (mapId, settings) {
 	this.inputs = {
 		lat: document.getElementById(mapId + '-input-lat'),
 		lng: document.getElementById(mapId + '-input-lng'),
+		zoom: document.getElementById(mapId + '-input-zoom'),
 		address: document.getElementById(mapId + '-input-address')
 	};
 
@@ -46,7 +47,8 @@ var SimpleMap = function (mapId, settings) {
 };
 
 SimpleMap.Fail = function (message) {
-	if (window.console) console.error('SimpleMap:', message);
+	Craft.cp.displayError('<strong>SimpleMap:</strong> ' + message);
+	if (window.console) console.error.apply(console, ['%cSimpleMap: %c' + message, 'font-weight:bold;','font-weight:normal;']);
 };
 
 SimpleMap.LoadGoogleAPI = function () {
@@ -112,14 +114,18 @@ SimpleMap.prototype.setupMap = function () {
 		map: this.map
 	});
 
-	// Get the initial lat/lng, falling back to defaults if we don't have one
-	var lat = this.inputs.lat.value || this.settings.lat,
-		lng = this.inputs.lng.value || this.settings.lng;
+	// Get the initial lat/lng/zoom, falling back to defaults if we don't have one
+	var lat = this.inputs.lat.value   || this.settings.lat,
+		lng = this.inputs.lng.value   || this.settings.lng,
+		zoom = this.inputs.zoom.value || this.settings.zoom;
 
 	// Update the marker location & center the map
 	this.update(lat, lng, false, true).center();
 
-	// When the autocomplete place changes
+	// Update map to saved zoom
+	this.map.setZoom(parseInt(zoom));
+
+	// When the auto-complete place changes
 	google.maps.event.addListener(autocomplete, 'place_changed', function () {
 		var address = self.address.value, lat, lng;
 		self.inputs.address.value = address;
@@ -172,6 +178,13 @@ SimpleMap.prototype.setupMap = function () {
 
 		self.update(lat, lng).sync();
 	});
+
+	// When the zoom is changed
+	google.maps.event.addListener(this.map, 'zoom_changed', function () {
+		var zoom = this.getZoom();
+
+		self.updateZoom(zoom).center();
+	});
 };
 
 SimpleMap.prototype.update = function (lat, lng, leaveMarker, leaveFields) {
@@ -190,6 +203,12 @@ SimpleMap.prototype.update = function (lat, lng, leaveMarker, leaveFields) {
 	return this;
 };
 
+SimpleMap.prototype.updateZoom = function (zoom) {
+	this.inputs.zoom.value = zoom;
+
+	return this;
+};
+
 SimpleMap.prototype.center = function () {
 	this.map.setCenter(this.map.marker.getPosition());
 
@@ -202,8 +221,12 @@ SimpleMap.prototype.sync = function (update) {
 
 	// Update address / lat / lng based off marker location
 	this.geo(pos, function (loc) {
-		self.address.value = loc.formatted_address;
-		self.inputs.address.value = loc.formatted_address;
+		// if loc, set address to formatted_location, else to postion
+		var address = loc ? loc.formatted_address : pos.lat() + ", " + pos.lng();
+
+		// update address value
+		self.address.value = address;
+		self.inputs.address.value = address;
 	});
 
 	if (update) return this.update(pos.lat, pos.lng, true);
@@ -215,15 +238,22 @@ SimpleMap.prototype.geo = function (latLng, callback) {
 	if (!latLng.lat) attr = {'address': latLng};
 
 	this.geocoder.geocode(attr, function (results, status) {
-		if (status !== google.maps.GeocoderStatus.OK) {
-			SimpleMap.Fail('Geocoder failed as a result of', status);
-			return;
-		} else if (!results[0]) {
-			SimpleMap.Fail('No results found!');
+		var loc;
+
+		// if location available, set loc to first result
+		if (status == google.maps.GeocoderStatus.OK) {
+			loc = results[0];
+
+		// if zero_results, set loc to false
+		} else if (status == google.maps.GeocoderStatus.ZERO_RESULTS) {
+			loc = false;
+
+		// else return error message
+		} else {
+			SimpleMap.Fail('Geocoder failed as a result of ' + status);
 			return;
 		}
 
-		var loc = results[0];
 		callback(loc);
 	});
 };
@@ -231,6 +261,7 @@ SimpleMap.prototype.geo = function (latLng, callback) {
 SimpleMap.prototype.clear = function () {
 	this.inputs.lat.value = '';
 	this.inputs.lng.value = '';
+	this.inputs.zoom.value = '';
 	this.inputs.address.value = '';
 };
 
